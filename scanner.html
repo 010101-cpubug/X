@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>E-Pass Scanner</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.2.0/crypto-js.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-database-compat.js"></script>
+</head>
+<body class="bg-gray-900 min-h-screen font-sans text-gray-100 flex items-center justify-center">
+    <div class="container mx-auto px-4 py-8 max-w-md">
+        <h1 class="text-2xl font-bold text-teal-400 text-center mb-4">E-Pass Scanner</h1>
+        <p class="text-gray-400 text-center mb-6">Scan QR code to verify entry</p>
+        
+        <div id="reader" class="mx-auto rounded overflow-hidden"></div>
+        <p class="text-sm text-gray-400 text-center mt-2">Position QR code in scanner</p>
+        
+        <div id="scanResult" class="hidden mt-4 bg-gray-800 p-4 rounded">
+            <p id="resultMessage" class="text-gray-100"></p>
+            <p id="resultDetails" class="text-gray-300 mt-2"></p>
+        </div>
+    </div>
+
+    <script>
+        const APP_SECRET = "7b9d3f8e2c1a4b6d9e0f2c4a8b7d6e1f"; // Must match Python app
+        const firebaseConfig = {
+            apiKey: "AIzaSyDuFI244bROIHv-TcHEDVitu1tcKhm32Nc",
+            authDomain: "yepp-21a4e.firebaseapp.com",
+            databaseURL: "https://yepp-21a4e-default-rtdb.firebaseio.com",
+            projectId: "yepp-21a4e",
+            storageBucket: "yepp-21a4e.firebasestorage.app",
+            messagingSenderId: "572080243753",
+            appId: "1:572080243753:web:269db93539eb635c1bc838",
+            measurementId: "G-EXCHN4ES0Z"
+        };
+
+        // Initialize Firebase
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.database();
+        const scansRef = db.ref("scans");
+
+        function hashQrData(passId) {
+            return CryptoJS.SHA256(passId + ":" + APP_SECRET).toString(CryptoJS.enc.Hex).slice(0, 16);
+        }
+
+        function initScanner() {
+            const html5QrScanner = new Html5Qrcode("reader");
+            document.getElementById("scanResult").classList.add("hidden");
+
+            Html5Qrcode.getCameras().then(devices => {
+                if (devices.length) {
+                    const camera = devices.find(d => d.label.toLowerCase().includes("back")) || devices[0];
+                    html5QrScanner.start(
+                        camera.id,
+                        { fps: 20, qrbox: { width: 250, height: 250 } },
+                        (decodedText) => {
+                            let passId, hash;
+                            try {
+                                [passId, hash] = decodedText.split(":");
+                                if (!passId || !hash) throw new Error("Invalid QR format");
+                            } catch (e) {
+                                showResult("Invalid QR Code", "QR code format is incorrect.", "bg-red-900");
+                                html5QrScanner.stop();
+                                setTimeout(initScanner, 3000);
+                                return;
+                            }
+
+                            if (hash !== hashQrData(passId)) {
+                                showResult("Invalid QR Code", "This QR code is not valid for this scanner.", "bg-red-900");
+                                html5QrScanner.stop();
+                                setTimeout(initScanner, 3000);
+                                return;
+                            }
+
+                            const scanId = Date.now().toString();
+                            scansRef.child(scanId).set({
+                                passId: passId,
+                                processed: false
+                            });
+
+                            scansRef.child(scanId).on("value", (snapshot) => {
+                                if (snapshot.exists() && snapshot.val().processed) {
+                                    const result = snapshot.val().result;
+                                    if (result.success) {
+                                        showResult(
+                                            "E-Pass Verified",
+                                            `Name: ${result.pass.name}<br>Event: ${result.pass.eventName}`,
+                                            "bg-green-900"
+                                        );
+                                    } else if (result.pass && result.pass.verified) {
+                                        showResult(
+                                            "E-Pass Already Used",
+                                            `Name: ${result.pass.name}<br>Event: ${result.pass.eventName}`,
+                                            "bg-yellow-900"
+                                        );
+                                    } else {
+                                        showResult("Invalid E-Pass", "This pass does not exist.", "bg-red-900");
+                                    }
+                                    html5QrScanner.stop();
+                                    scansRef.child(scanId).off();
+                                    setTimeout(initScanner, 3000);
+                                }
+                            });
+                        },
+                        (error) => console.warn("QR scan error:", error)
+                    ).catch(err => showResult("Camera Error", "Failed to access camera.", "bg-red-900"));
+                } else {
+                    showResult("No Cameras", "No cameras found on this device.", "bg-red-900");
+                }
+            }).catch(err => showResult("Camera Error", "Camera access denied.", "bg-red-900"));
+        }
+
+        function showResult(message, details, bgColor) {
+            document.getElementById("scanResult").classList.remove("hidden");
+            document.getElementById("resultMessage").textContent = message;
+            document.getElementById("resultDetails").innerHTML = details;
+            document.getElementById("scanResult").className = `mt-4 p-4 rounded ${bgColor}`;
+        }
+
+        // Start scanner
+        initScanner();
+    </script>
+</body>
+</html>
