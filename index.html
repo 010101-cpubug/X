@@ -81,42 +81,46 @@
                             }
 
                             const scanId = Date.now().toString();
-                            console.log("Sending scan to RTDB:", { scanId, passId });
-                            scansRef.child(scanId).set({
-                                passId: passId,
-                                processed: false
-                            }).catch(err => {
-                                console.error("RTDB write error:", err);
-                                showResult("Connection Error", "Failed to send scan data.", "bg-red-900");
-                            });
+                            const scanData = { passId: passId, processed: false };
+                            console.log("Attempting to write scan to RTDB:", { scanId, scanData });
 
-                            scansRef.child(scanId).on("value", (snapshot) => {
-                                if (snapshot.exists() && snapshot.val().processed) {
-                                    const result = snapshot.val().result;
-                                    console.log("Received RTDB result:", result);
-                                    if (result.success) {
-                                        showResult(
-                                            "E-Pass Verified",
-                                            `Name: ${result.pass.name}<br>Event: ${result.pass.eventName}`,
-                                            "bg-green-900"
-                                        );
-                                    } else if (result.pass && result.pass.verified) {
-                                        showResult(
-                                            "E-Pass Already Used",
-                                            `Name: ${result.pass.name}<br>Event: ${result.pass.eventName}`,
-                                            "bg-yellow-900"
-                                        );
-                                    } else {
-                                        showResult("Invalid E-Pass", "This pass does not exist.", "bg-red-900");
-                                    }
+                            scansRef.child(scanId).set(scanData)
+                                .then(() => {
+                                    console.log("Successfully wrote scan to RTDB:", scanId);
+                                    scansRef.child(scanId).on("value", (snapshot) => {
+                                        if (snapshot.exists() && snapshot.val().processed) {
+                                            const result = snapshot.val().result;
+                                            console.log("Received RTDB result:", result);
+                                            if (result.success) {
+                                                showResult(
+                                                    "E-Pass Verified",
+                                                    `Name: ${result.pass.name}<br>Event: ${result.pass.eventName}`,
+                                                    "bg-green-900"
+                                                );
+                                            } else if (result.pass && result.pass.verified) {
+                                                showResult(
+                                                    "E-Pass Already Used",
+                                                    `Name: ${result.pass.name}<br>Event: ${result.pass.eventName}`,
+                                                    "bg-yellow-900"
+                                                );
+                                            } else {
+                                                showResult("Invalid E-Pass", "This pass does not exist.", "bg-red-900");
+                                            }
+                                            html5QrScanner.stop();
+                                            scansRef.child(scanId).off();
+                                            setTimeout(initScanner, 3000);
+                                        }
+                                    }, (err) => {
+                                        console.error("RTDB listen error:", err);
+                                        showResult("Connection Error", "Failed to receive scan result.", "bg-red-900");
+                                    });
+                                })
+                                .catch(err => {
+                                    console.error("RTDB write error:", err);
+                                    showResult("Connection Error", "Failed to send scan data: " + err.message, "bg-red-900");
                                     html5QrScanner.stop();
-                                    scansRef.child(scanId).off();
                                     setTimeout(initScanner, 3000);
-                                }
-                            }, (err) => {
-                                console.error("RTDB listen error:", err);
-                                showResult("Connection Error", "Failed to receive scan result.", "bg-red-900");
-                            });
+                                });
                         },
                         (error) => console.warn("QR scan error:", error)
                     ).catch(err => {
